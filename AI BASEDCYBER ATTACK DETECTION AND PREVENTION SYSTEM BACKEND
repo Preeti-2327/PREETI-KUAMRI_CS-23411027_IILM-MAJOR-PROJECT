@@ -1,0 +1,218 @@
+import pandas as pd
+import matplotlib.pyplot as plt
+import joblib
+
+from sklearn.model_selection import train_test_split, cross_val_score, GridSearchCV
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import LabelEncoder
+from sklearn.metrics import (
+    accuracy_score,
+    classification_report,
+    confusion_matrix,
+    roc_curve,
+    auc,
+    precision_recall_curve,
+    f1_score
+)
+
+# ============================================
+# Column Names
+# ============================================
+
+column_names = [
+"duration","protocol_type","service","flag","src_bytes","dst_bytes",
+"land","wrong_fragment","urgent","hot","num_failed_logins","logged_in",
+"num_compromised","root_shell","su_attempted","num_root",
+"num_file_creations","num_shells","num_access_files","num_outbound_cmds",
+"is_host_login","is_guest_login","count","srv_count","serror_rate",
+"srv_serror_rate","rerror_rate","srv_rerror_rate","same_srv_rate",
+"diff_srv_rate","srv_diff_host_rate","dst_host_count","dst_host_srv_count",
+"dst_host_same_srv_rate","dst_host_diff_srv_rate",
+"dst_host_same_src_port_rate","dst_host_srv_diff_host_rate",
+"dst_host_serror_rate","dst_host_srv_serror_rate",
+"dst_host_rerror_rate","dst_host_srv_rerror_rate",
+"label","difficulty"
+]
+
+# ============================================
+# Load Dataset
+# ============================================
+
+data = pd.read_csv("KDDTrain+.csv", header=None, names=column_names)
+print("Dataset Shape:", data.shape)
+
+# ============================================
+# Convert Label to Binary
+# ============================================
+
+data["label"] = data["label"].apply(lambda x: 0 if x == "normal" else 1)
+
+# Remove difficulty column
+data = data.drop("difficulty", axis=1)
+
+# ============================================
+# Encode Categorical Columns (UPDATED)
+# ============================================
+
+encoders = {}
+
+for column in data.columns:
+    if data[column].dtype == 'object':
+        le = LabelEncoder()
+        data[column] = le.fit_transform(data[column])
+        encoders[column] = le  # Save encoder for deployment
+
+print("Encoders created for:", list(encoders.keys()))
+
+# ============================================
+# Class Distribution
+# ============================================
+
+print("\nClass Distribution:")
+print(data["label"].value_counts())
+
+# ============================================
+# Split Data
+# ============================================
+
+X = data.drop("label", axis=1)
+y = data["label"]
+
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42
+)
+
+# ============================================
+# Model Comparison
+# ============================================
+
+models = {
+    "Random Forest": RandomForestClassifier(class_weight="balanced"),
+    "Decision Tree": DecisionTreeClassifier(),
+    "Logistic Regression": LogisticRegression(max_iter=1000)
+}
+
+print("\nModel Comparison:")
+for name, m in models.items():
+    m.fit(X_train, y_train)
+    pred = m.predict(X_test)
+    acc = accuracy_score(y_test, pred)
+    print(f"{name}: {acc}")
+
+# ============================================
+# Hyperparameter Tuning
+# ============================================
+
+param_grid = {
+    'n_estimators': [100, 200],
+    'max_depth': [None, 20, 40],
+    'min_samples_split': [2, 5]
+}
+
+grid = GridSearchCV(
+    RandomForestClassifier(class_weight="balanced"),
+    param_grid,
+    cv=3
+)
+
+grid.fit(X_train, y_train)
+
+model = grid.best_estimator_
+
+print("\nBest Parameters:", grid.best_params_)
+
+# ============================================
+# Cross Validation
+# ============================================
+
+cv_scores = cross_val_score(model, X, y, cv=5)
+print("\nCross Validation Scores:", cv_scores)
+print("Average CV Accuracy:", cv_scores.mean())
+
+# ============================================
+# Prediction
+# ============================================
+
+y_pred = model.predict(X_test)
+y_prob = model.predict_proba(X_test)[:, 1]
+
+# ============================================
+# Evaluation Metrics
+# ============================================
+
+accuracy = accuracy_score(y_test, y_pred)
+print("\nFinal Model Accuracy:", accuracy)
+
+print("\nConfusion Matrix:")
+print(confusion_matrix(y_test, y_pred))
+
+print("\nClassification Report:")
+print(classification_report(y_test, y_pred))
+
+print("F1 Score:", f1_score(y_test, y_pred))
+
+# ============================================
+# ROC Curve
+# ============================================
+
+fpr, tpr, _ = roc_curve(y_test, y_prob)
+roc_auc = auc(fpr, tpr)
+
+print("ROC-AUC Score:", roc_auc)
+
+plt.figure()
+plt.plot(fpr, tpr)
+plt.xlabel("False Positive Rate")
+plt.ylabel("True Positive Rate")
+plt.title("ROC Curve")
+plt.show()
+
+# ============================================
+# Precision-Recall Curve
+# ============================================
+
+precision, recall, _ = precision_recall_curve(y_test, y_prob)
+
+plt.figure()
+plt.plot(recall, precision)
+plt.xlabel("Recall")
+plt.ylabel("Precision")
+plt.title("Precision-Recall Curve")
+plt.show()
+
+# ============================================
+# Feature Importance
+# ============================================
+
+importances = model.feature_importances_
+feature_names = X.columns
+
+feature_importance_df = pd.DataFrame({
+    "Feature": feature_names,
+    "Importance": importances
+}).sort_values(by="Importance", ascending=False)
+
+print("\nTop 10 Important Features:")
+print(feature_importance_df.head(10))
+
+plt.figure()
+plt.barh(
+    feature_importance_df["Feature"].head(10),
+    feature_importance_df["Importance"].head(10)
+)
+plt.xlabel("Importance")
+plt.title("Top 10 Feature Importances")
+plt.gca().invert_yaxis()
+plt.show()
+
+# ============================================
+# Save Model + Encoders (IMPORTANT)
+# ============================================
+
+joblib.dump(model, "model.pkl")
+joblib.dump(encoders, "encoders.pkl")
+
+print("\nModel saved as model.pkl")
+print("Encoders saved as encoders.pkl")
